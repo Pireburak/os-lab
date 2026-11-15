@@ -42,33 +42,62 @@ Java.perform(function () {
   log('starting root-detection bypass (lab use only)');
 
   // 1. File.exists() for known su/magisk paths.
+  //    Keep the original overload reference and call *it* for non-root paths so
+  //    we return the real answer without re-entering (and recursing into) the hook.
   try {
     var File = Java.use('java.io.File');
-    File.exists.implementation = function () {
+    var fileExists = File.exists.overload();
+    fileExists.implementation = function () {
       var path = this.getAbsolutePath();
       if (ROOT_PATHS.indexOf(path) !== -1) {
         log('File.exists(' + path + ') -> false');
         return false;
       }
-      return this.exists();
+      return fileExists.call(this);
     };
     log('hooked java.io.File.exists');
   } catch (e) {
     log('File.exists hook skipped: ' + e);
   }
 
-  // 2. Runtime.exec("su" / "which su").
+  // Only block the exact root-probe commands, so legitimate commands that merely
+  // contain the letters "su"/"which" (e.g. "sudoku", "lsusb") run untouched.
+  function isRootCommand(cmd) {
+    if (!cmd) return false;
+    var c = ('' + cmd).trim();
+    var base = c.split(/\s+/)[0];
+    var leaf = base.substring(base.lastIndexOf('/') + 1);
+    if (leaf === 'su' || leaf === 'magisk' || leaf === 'busybox') return true;
+    // "which su" / "command -v su" style probes
+    return /\b(which|command\s+-v)\s+su\b/.test(c);
+  }
+
+  // 2. Runtime.exec — cover BOTH the String and String[] overloads; the array
+  //    overload previously slipped past the filter entirely.
   try {
     var Runtime = Java.use('java.lang.Runtime');
-    var exec1 = Runtime.exec.overload('java.lang.String');
-    exec1.implementation = function (cmd) {
-      if (cmd && (cmd.indexOf('su') !== -1 || cmd.indexOf('which') !== -1)) {
-        log('Runtime.exec(' + cmd + ') -> blocked');
-        return exec1.call(this, 'echo');
+
+    var execStr = Runtime.exec.overload('java.lang.String');
+    execStr.implementation = function (cmd) {
+      if (isRootCommand(cmd)) {
+        log('Runtime.exec("' + cmd + '") -> blocked');
+        return execStr.call(this, 'echo');
       }
-      return exec1.call(this, cmd);
+      return execStr.call(this, cmd);
     };
-    log('hooked Runtime.exec');
+
+    var execArr = Runtime.exec.overload('[Ljava.lang.String;');
+    execArr.implementation = function (cmdArr) {
+      var first = cmdArr && cmdArr.length ? cmdArr[0] : '';
+      var joined = cmdArr ? Array.prototype.join.call(cmdArr, ' ') : '';
+      if (isRootCommand(first) || isRootCommand(joined)) {
+        log('Runtime.exec([' + joined + ']) -> blocked');
+        return execStr.call(this, 'echo');
+      }
+      return execArr.call(this, cmdArr);
+    };
+
+    log('hooked Runtime.exec (String + String[])');
   } catch (e) {
     log('Runtime.exec hook skipped: ' + e);
   }
@@ -82,14 +111,29 @@ Java.perform(function () {
     /* field may be final on some runtimes */
   }
 
-  // 4. RootBeer, when the app bundles it.
+  // 4. RootBeer — neutralise the aggregate AND the individual checks it exposes,
+  //    since apps often call the granular methods directly.
   try {
     var RootBeer = Java.use('com.scottyab.rootbeer.RootBeer');
-    RootBeer.isRooted.implementation = function () {
-      log('RootBeer.isRooted -> false');
-      return false;
-    };
-    log('hooked RootBeer.isRooted');
+    var falseMethods = [
+      'isRooted', 'isRootedWithoutBusyBoxCheck', 'checkForBusyBoxBinary',
+      'checkForSuBinary', 'checkForRWPaths', 'checkForDangerousProps',
+      'checkForRootNative', 'detectRootManagementApps', 'detectPotentiallyDangerousApps',
+      'detectTestKeys', 'checkForMagiskBinary', 'checkSuExists',
+    ];
+    falseMethods.forEach(function (name) {
+      if (RootBeer[name]) {
+        try {
+          RootBeer[name].overloads.forEach(function (ov) {
+            ov.implementation = function () {
+              log('RootBeer.' + name + ' -> false');
+              return false;
+            };
+          });
+        } catch (inner) { /* some overloads can't be hooked; skip */ }
+      }
+    });
+    log('hooked RootBeer (aggregate + individual checks)');
   } catch (e) {
     /* RootBeer not bundled */
   }

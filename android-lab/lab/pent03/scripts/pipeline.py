@@ -28,7 +28,11 @@ import report as report_mod
 import scope
 import sslpinning_bypass
 
-#: host:port the emulator reaches mitmproxy on (10.0.2.2 == host loopback).
+#: host:port the emulator reaches mitmproxy on. ``10.0.2.2`` is the emulator's
+#: alias for its own host, so this is correct for the host-mode run (a local
+#: emulator with mitmproxy on the host). For the docker-compose stack, pass
+#: ``--proxy`` with the address at which the emulator container reaches the
+#: ``mitmproxy`` service (see docker/docker-compose.yml and the README).
 DEFAULT_PROXY = "10.0.2.2:8080"
 
 STEPS = ("scope", "boot", "frida", "ca", "proxy", "unpin")
@@ -39,9 +43,29 @@ def plan(*, skip: tuple[str, ...] = ()) -> list[str]:
     return [s for s in STEPS if s not in skip]
 
 
+def parse_proxy(proxy: str) -> tuple[str, int]:
+    """Parse and validate a ``host:port`` proxy string.
+
+    Returns ``(host, port)``. Raises :class:`ValueError` on anything that is not
+    a bare host plus a numeric 1–65535 port — so no shell metacharacters (e.g.
+    ``10.0.2.2:8080;id``) can ever reach ``adb shell`` as a device-side command.
+    The host must also be an in-scope lab proxy host.
+    """
+    proxy = (proxy or "").strip()
+    if proxy.count(":") != 1:
+        raise ValueError(f"proxy must be exactly host:port, got {proxy!r}")
+    host, port = proxy.rsplit(":", 1)
+    if not port.isdigit() or not (1 <= int(port) <= 65535):
+        raise ValueError(f"proxy port must be a number in 1..65535, got {port!r}")
+    if not scope.proxy_host_in_scope(host):
+        raise ValueError(f"proxy host {host!r} is not an in-scope lab host")
+    return host, int(port)
+
+
 def set_proxy_command(proxy: str) -> list[str]:
-    """adb args that set the device-wide HTTP proxy to ``proxy``."""
-    return ["settings", "put", "global", "http_proxy", proxy]
+    """adb args that set the device-wide HTTP proxy to a validated ``host:port``."""
+    host, port = parse_proxy(proxy)
+    return ["settings", "put", "global", "http_proxy", f"{host}:{port}"]
 
 
 def clear_proxy_command() -> list[str]:
@@ -85,31 +109,60 @@ def run_pipeline(
     """Execute the pipeline against a device. Returns a :class:`PipelineReport`."""
     report = PipelineReport(package=package, serial=serial)
     steps = plan(skip=skip)
-    proxy_host = proxy.rsplit(":", 1)[0]
+    # parse_proxy validates host:port up front (and raises on anything unsafe).
+    proxy_host, _ = parse_proxy(proxy)
 
-    # 1. scope — always enforced, never skippable.
+    # 1. scope — always enforced, never skippable. A scope failure is fatal and
+    #    raises before any device action.
     scope.assert_in_scope(serial=serial, package=package, proxy_host=proxy_host)
     report.add("scope", True, f"{serial} / {package} / {proxy_host}")
 
+    # Each subsequent step is recorded even on failure, and the first failure
+    # stops the run so a partial but complete audit trail is always available.
+    def _step(name: str, fn) -> bool:
+        try:
+            detail = fn()
+            report.add(name, True, detail)
+            return True
+        except Exception as exc:  # recorded, not swallowed — run stops after this
+            report.add(name, False, f"{type(exc).__name__}: {exc}")
+            return False
+
     if "boot" in steps:
-        adb.wait_for_boot(serial, sleep=sleep)
-        report.add("boot", True, "emulator boot_completed")
+        def _boot():
+            adb.wait_for_boot(serial, sleep=sleep)
+            return "emulator boot_completed"
+        if not _step("boot", _boot):
+            return report
 
     if "frida" in steps:
-        ver = deploy_frida.deploy(serial, version=frida_version)
-        report.add("frida", True, f"frida-server {ver} running")
+        def _frida():
+            ver = deploy_frida.deploy(serial, version=frida_version)
+            return f"frida-server {ver} running"
+        if not _step("frida", _frida):
+            return report
 
     if "ca" in steps:
-        remote = install_ca.install(serial, ca_path)
-        report.add("ca", True, f"mitmproxy CA at {remote}")
+        def _ca():
+            remote = install_ca.install(serial, ca_path)
+            return f"mitmproxy CA at {remote}"
+        if not _step("ca", _ca):
+            return report
 
     if "proxy" in steps:
-        adb.shell(serial, *set_proxy_command(proxy))
-        report.add("proxy", True, f"global http_proxy -> {proxy}")
+        def _proxy():
+            adb.shell(serial, *set_proxy_command(proxy))
+            return f"global http_proxy -> {proxy}"
+        if not _step("proxy", _proxy):
+            return report
 
     if "unpin" in steps:
-        code = sslpinning_bypass.bypass(package, serial=serial)
-        report.add("unpin", code == 0, f"objection exit={code}")
+        def _unpin():
+            code = sslpinning_bypass.bypass(package, serial=serial)
+            if code != 0:
+                raise sslpinning_bypass.BypassError(f"objection exit={code}")
+            return "objection exit=0"
+        _step("unpin", _unpin)
 
     return report
 
@@ -152,10 +205,16 @@ def main(argv: list[str] | None = None) -> int:
     skip = tuple(s.strip() for s in args.skip.split(",") if s.strip())
 
     try:
+        proxy_host, _ = parse_proxy(args.proxy)
+    except ValueError as exc:
+        print(f"invalid --proxy: {exc}", file=sys.stderr)
+        return 2
+
+    try:
         scope.assert_in_scope(
             serial=args.serial,
             package=args.package,
-            proxy_host=args.proxy.rsplit(":", 1)[0],
+            proxy_host=proxy_host,
         )
     except scope.ScopeError as exc:
         print(f"OUT OF SCOPE: {exc}", file=sys.stderr)
@@ -165,20 +224,18 @@ def main(argv: list[str] | None = None) -> int:
         _print_dry_run(args.package, args.serial, args.proxy, skip)
         return 0
 
-    try:
-        report = run_pipeline(
-            args.package,
-            serial=args.serial,
-            proxy=args.proxy,
-            frida_version=args.frida_version,
-            ca_path=args.ca,
-            skip=skip,
-        )
-    except (scope.ScopeError, adb.AdbError, deploy_frida.FridaDeployError,
-            install_ca.CaInstallError, sslpinning_bypass.BypassError) as exc:
-        print(f"pipeline failed: {exc}", file=sys.stderr)
-        return 1
+    # run_pipeline records each step (including failures) and returns a report;
+    # only a scope/validation error raises, which we already guarded above.
+    report = run_pipeline(
+        args.package,
+        serial=args.serial,
+        proxy=args.proxy,
+        frida_version=args.frida_version,
+        ca_path=args.ca,
+        skip=skip,
+    )
 
+    # Always write the report (even a partial one on failure) before returning.
     if args.report:
         json_path, md_path = report_mod.write_report(report, args.report)
         print(f"  [report] {json_path}")

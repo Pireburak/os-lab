@@ -136,6 +136,15 @@ def enable_root(serial: str | None, adb: str = DEFAULT_ADB) -> None:
     run(adb_argv(serial, "wait-for-device", adb=adb), timeout=60)
 
 
+def is_root(serial: str | None, adb: str = DEFAULT_ADB) -> bool:
+    """Return True if the adb shell runs as uid 0 (root) on the device."""
+    try:
+        out = shell(serial, "id", "-u", adb=adb, check=False)
+    except AdbError:
+        return False
+    return out.strip() == "0"
+
+
 def remount(serial: str | None, adb: str = DEFAULT_ADB) -> None:
     """Remount ``/system`` read-write (needs a rooted emulator image)."""
     run(adb_argv(serial, "remount", adb=adb), check=False)

@@ -64,15 +64,22 @@ def objection_argv(
 def frida_fallback_argv(
     package: str,
     *,
-    serial_usb: bool = True,
+    serial: str | None = None,
     hook: str = UNIVERSAL_HOOK,
     frida_bin: str = "frida",
 ) -> list[str]:
-    """Build a ``frida -U -f <package> -l <hook> --no-pause`` fallback argv."""
+    """Build a ``frida`` fallback argv that targets a *specific* device.
+
+    When ``serial`` is given, select that device with ``-D <serial>`` so the
+    hook never lands on the wrong device; otherwise fall back to ``-U`` (the one
+    connected USB/emulator device).
+    """
     if not package:
         raise BypassError("a target package id is required")
     argv = [frida_bin]
-    if serial_usb:
+    if serial:
+        argv += ["-D", serial]
+    else:
         argv += ["-U"]
     argv += ["-f", package, "-l", hook, "--no-pause"]
     return argv
@@ -104,15 +111,21 @@ def run_objection(
 def run_frida_fallback(
     package: str,
     *,
+    serial: str | None = None,
     hook: str = UNIVERSAL_HOOK,
     frida_bin: str = "frida",
     runner=subprocess.run,
 ) -> int:
-    """Launch the frida universal unpinning hook. Returns the exit code."""
-    scope.assert_in_scope(package=package)
+    """Launch the frida universal unpinning hook on ``serial``. Returns exit code.
+
+    Note: the unpinning hook must stay resident to keep pins neutralised, so this
+    spawns the app and holds the session; run it as the last pipeline step (or in
+    its own process) rather than expecting it to return immediately.
+    """
+    scope.assert_in_scope(serial=serial, package=package)
     if not os.path.isfile(hook):
         raise BypassError(f"frida hook not found: {hook}")
-    argv = frida_fallback_argv(package, hook=hook, frida_bin=frida_bin)
+    argv = frida_fallback_argv(package, serial=serial, hook=hook, frida_bin=frida_bin)
     proc = runner(argv)
     return getattr(proc, "returncode", 0)
 
@@ -130,7 +143,7 @@ def bypass(
     if prefer == "objection" and have("objection"):
         return run_objection(package, serial=serial, runner=runner)
     if have("frida"):
-        return run_frida_fallback(package, runner=runner)
+        return run_frida_fallback(package, serial=serial, runner=runner)
     raise BypassError(
         "neither 'objection' nor 'frida' is installed; "
         "pip install objection frida-tools"

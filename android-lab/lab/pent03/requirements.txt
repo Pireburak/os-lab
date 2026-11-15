@@ -6,6 +6,10 @@
 #
 #   python3 -m pip install -r requirements.txt
 
+# frida (client core) is PINNED to match the deployed frida-server default
+# (deploy_frida.DEFAULT_FRIDA_VERSION = 16.5.9); a client/server mismatch fails
+# to attach, so keep these two in lock-step.
+frida==16.5.9          # frida client core — must match frida-server version
 frida-tools>=13.0      # frida CLI used by the SSL-unpinning fallback
 objection>=1.11.0      # universal SSL-pinning bypass driver
 mitmproxy>=11.0.0      # intercepting proxy + CA generator + addon host

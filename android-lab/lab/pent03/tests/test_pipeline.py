@@ -21,6 +21,39 @@ def test_proxy_commands():
     assert pipeline.clear_proxy_command()[-1] == ":0"
 
 
+def test_parse_proxy_rejects_shell_injection():
+    # the classic payload: a shell metachar smuggled through the port
+    with pytest.raises(ValueError):
+        pipeline.parse_proxy("10.0.2.2:8080;id")
+    with pytest.raises(ValueError):
+        pipeline.parse_proxy("10.0.2.2:$(reboot)")
+    with pytest.raises(ValueError):
+        pipeline.parse_proxy("10.0.2.2:70000")  # port out of range
+    with pytest.raises(ValueError):
+        pipeline.parse_proxy("8.8.8.8:8080")     # host not in scope
+    assert pipeline.parse_proxy("10.0.2.2:8080") == ("10.0.2.2", 8080)
+
+
+def test_set_proxy_command_rejects_injection():
+    with pytest.raises(ValueError):
+        pipeline.set_proxy_command("10.0.2.2:8080;rm -rf /")
+
+
+def test_partial_report_written_on_step_failure(monkeypatch):
+    # frida blows up; boot already passed. The report must still carry both.
+    monkeypatch.setattr(pipeline.adb, "wait_for_boot", lambda s, **k: None)
+
+    def boom(*a, **k):
+        raise pipeline.deploy_frida.FridaDeployError("no network")
+
+    monkeypatch.setattr(pipeline.deploy_frida, "deploy", boom)
+    report = pipeline.run_pipeline("com.securebank.mobile", serial="emulator-5554")
+    names = [s.name for s in report.steps]
+    assert names == ["scope", "boot", "frida"]      # stopped at the failure
+    assert report.steps[-1].name == "frida" and not report.steps[-1].ok
+    assert not report.ok
+
+
 def test_run_pipeline_happy_path(monkeypatch):
     calls = []
 

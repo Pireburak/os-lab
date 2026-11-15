@@ -16,7 +16,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 compose_file="${here}/docker/docker-compose.yml"
-pipeline="${here}/lab/scripts/pipeline.py"
+pipeline="${here}/scripts/pipeline.py"
 
 use_docker=0
 args=()

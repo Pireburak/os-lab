@@ -1,4 +1,4 @@
-# lab/ — scripts, hooks and tests
+# PENT-03 — scripts, hooks and tests
 
 Standard-library-only Python modules and Frida hooks that make up the PENT-03
 pipeline. Every module exposes an importable API plus a `main()` CLI, and keeps
@@ -68,6 +68,6 @@ injected or monkeypatched, and the only shell-out (openssl, for the CA subject
 hash) runs against a locally generated self-signed cert.
 
 ```bash
-../../scripts/run-tests.sh          # full
-../../scripts/run-tests.sh --quick  # skip the openssl-dependent cases
+./run-tests.sh          # full offline suite (75 tests)
+cd tests && python3 -m pytest -q
 ```

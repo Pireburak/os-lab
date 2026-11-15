@@ -74,11 +74,39 @@ writable-system apex-tmpfs
 
 **Tam offline test takımı:**
 ```
-$ ./pent03/run-tests.sh         # (veya: cd tests && python3 -m pytest -q)
-65 passed in ~0.3s
+$ ./run-tests.sh                # (veya: cd tests && python3 -m pytest -q)
+75 passed in ~0.8s
 ```
 
 Statik analiz (`pyflakes`) temiz; Bash scriptleri `bash -n` ile doğrulandı.
+
+## 6. Kod İnceleme ve Sertleştirme (review hardening)
+
+PR üzerindeki otomatik inceleme (Sourcery) 30 bulgu üretti ve tamamı ele alındı.
+Öne çıkan güvenlik/doğruluk düzeltmeleri:
+
+- **Komut enjeksiyonu:** `--proxy` artık katı `host:port` olarak doğrulanıyor
+  (`parse_proxy`); port numerik 1–65535 ve host scope içinde olmalı — `adb shell`
+  komutuna kabuk metakarakteri geçemiyor.
+- **Path traversal:** paket kimliği katı Android app-id desenine zorlanıyor ve
+  rapor dosya adları sanitize ediliyor; `..`/`/` içeren değerler reddediliyor.
+- **Scope daraltması:** geniş `com.example.` ön eki kaldırıldı, proxy host'u tam
+  eşleşme (alt ağ güvenilmiyor), boş/eksik serial reddediliyor (`require_serial`).
+- **Root doğrulama:** `adb root` sonrası gerçek root (uid 0) teyidi; değilse hata.
+- **API 34 overlay:** kritik mount/cp adımları artık hata kontrollü, overlay
+  zygote namespace'ine de uygulanıyor, ve "reboot" yanıltıcı mesajı düzeltildi
+  (tmpfs reboot'ta kaybolur).
+- **Docker:** portlar yalnızca `127.0.0.1`'e bağlı, `privileged` kaldırıldı
+  (yalnız `/dev/kvm`), mitmproxy CA volume'u gerçek yoluna (`/home/mitmproxy`)
+  taşındı, build-context/yol uyumsuzlukları giderildi, frida istemci sürümü
+  sunucuyla sabitlendi.
+- **Frida hook'ları:** `File.exists` recursion'ı, `Runtime.exec` substring/dizi
+  overload kaçakları, RootBeer tekil kontrolleri, NSC `checkServerTrusted`
+  zincir dönüşü ve WebView alt sınıf kapsaması düzeltildi.
+- **Dayanıklılık:** ağ hataları `FridaDeployError`'a sarmalanıyor; başarısızlıkta
+  bile kısmi denetim raporu yazılıyor; rapor dosya adlarına benzersiz ek eklendi.
+
+Düzeltmelerden sonra offline test takımı **75 test** ile yeşil.
 
 ## 4. Mimari ve Çalışma Akışı
 

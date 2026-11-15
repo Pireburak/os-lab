@@ -86,12 +86,18 @@ function hookNetworkSecurityConfig() {
     var NSTM = Java.use(
       'android.security.net.config.NetworkSecurityTrustManager'
     );
+    // This 3-arg overload returns List<X509Certificate> (the trusted chain).
+    // Returning undefined breaks callers, so hand back the presented chain.
+    var ArrayList = Java.use('java.util.ArrayList');
     NSTM.checkServerTrusted.overload(
       '[Ljava.security.cert.X509Certificate;',
       'java.lang.String',
       'java.lang.String'
     ).implementation = function (chain, authType, host) {
       log('NetworkSecurityConfig.checkServerTrusted -> accepted ' + host);
+      var list = ArrayList.$new();
+      for (var i = 0; chain && i < chain.length; i++) list.add(chain[i]);
+      return list;
     };
     log('hooked NetworkSecurityTrustManager');
   } catch (e) {
@@ -115,15 +121,42 @@ function hookHostnameVerifier() {
 }
 
 function hookWebView() {
+  // Hook the base WebViewClient. This covers subclasses that call
+  // super.onReceivedSslError(...). Subclasses that fully override it without
+  // calling super dispatch to their own method, so we also sweep already-loaded
+  // WebViewClient subclasses and hook their override directly (best effort).
   try {
     var WebViewClient = Java.use('android.webkit.WebViewClient');
-    WebViewClient.onReceivedSslError.implementation = function (view, handler) {
-      log('WebViewClient.onReceivedSslError -> proceed');
-      handler.proceed();
-    };
+    WebViewClient.onReceivedSslError.overloads.forEach(function (ov) {
+      ov.implementation = function (view, handler, error) {
+        log('WebViewClient.onReceivedSslError -> proceed');
+        handler.proceed();
+      };
+    });
     log('hooked WebViewClient.onReceivedSslError');
   } catch (e) {
     /* no WebView pinning */
+  }
+
+  try {
+    Java.enumerateLoadedClasses({
+      onMatch: function (name) {
+        if (!/webview|sslclient|webclient/i.test(name)) return;
+        try {
+          var Cls = Java.use(name);
+          if (!Cls.onReceivedSslError) return;
+          Cls.onReceivedSslError.overloads.forEach(function (ov) {
+            ov.implementation = function (view, handler, error) {
+              log('override ' + name + '.onReceivedSslError -> proceed');
+              handler.proceed();
+            };
+          });
+        } catch (inner) { /* not a hookable subclass; skip */ }
+      },
+      onComplete: function () {},
+    });
+  } catch (e) {
+    /* class sweep unavailable; base hook still applies */
   }
 }
 

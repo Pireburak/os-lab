@@ -2,24 +2,32 @@
 #
 # Controller entrypoint — waits for the emulator container to appear on adb,
 # then hands over to the Python pipeline. Everything the controller does is
-# argv-driven and scope-guarded (see lab/scripts/scope.py); this wrapper only
-# wires adb up to the remote emulator and forwards arguments.
+# argv-driven and scope-guarded (see scripts/scope.py); this wrapper also
+# refuses to connect adb anywhere that is not an in-scope lab device.
 #
 # Usage inside the container (set by docker-compose):
-#   ANDROID_ADB_SERVER / EMULATOR_HOST point adb at the emulator sidecar.
+#   EMULATOR_HOST / EMULATOR_ADB_PORT point adb at the emulator sidecar.
 #   Any extra args are passed straight to pipeline.py, e.g.:
 #     docker compose run controller com.securebank.mobile --proxy 10.0.2.2:8080
 set -euo pipefail
 
+# The Compose service host/port are authoritative; we do not honour a baked-in
+# ANDROID_SERIAL that could point adb at an unintended device.
 EMULATOR_HOST="${EMULATOR_HOST:-emulator}"
 EMULATOR_ADB_PORT="${EMULATOR_ADB_PORT:-5555}"
-SERIAL="${ANDROID_SERIAL:-${EMULATOR_HOST}:${EMULATOR_ADB_PORT}}"
+SERIAL="${EMULATOR_HOST}:${EMULATOR_ADB_PORT}"
 CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-180}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-scripts_dir="${here}/../lab/scripts"
+scripts_dir="${here}/../scripts"
 
 log() { printf '[controller] %s\n' "$*"; }
+
+# Scope gate BEFORE any adb call: refuse to connect to a non-lab destination.
+if ! python3 "${scripts_dir}/scope.py" --serial "${SERIAL}" >/dev/null; then
+  log "ERROR: refusing to connect adb to out-of-scope device '${SERIAL}'"
+  exit 2
+fi
 
 log "connecting adb to ${SERIAL} (timeout ${CONNECT_TIMEOUT}s)"
 adb start-server >/dev/null 2>&1 || true

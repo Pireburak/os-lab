@@ -23,6 +23,7 @@ import lzma
 import os
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 
 import adb
@@ -83,8 +84,13 @@ def resolve_version(version: str, *, opener=urllib.request.urlopen) -> str:
     """Return a concrete version. ``latest`` is resolved via the GitHub API."""
     if version and version.lower() != "latest":
         return version.lstrip("v")
-    with opener(LATEST_API, timeout=30) as resp:
-        data = json.load(resp)
+    try:
+        with opener(LATEST_API, timeout=30) as resp:
+            data = json.load(resp)
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise FridaDeployError(
+            f"could not reach the GitHub API to resolve the latest frida version: {exc}"
+        ) from exc
     tag = data.get("tag_name")
     if not tag:
         raise FridaDeployError("could not read latest frida version from GitHub API")
@@ -101,8 +107,11 @@ def fetch_server(
     """
     url = download_url(version, arch)
     out_path = os.path.join(dest_dir, "frida-server")
-    with opener(url, timeout=120) as resp:
-        compressed = resp.read()
+    try:
+        with opener(url, timeout=120) as resp:
+            compressed = resp.read()
+    except (urllib.error.URLError, OSError) as exc:
+        raise FridaDeployError(f"failed to download {url}: {exc}") from exc
     try:
         binary = lzma.decompress(compressed)
     except lzma.LZMAError as exc:
@@ -129,12 +138,17 @@ def deploy(
 
     Returns the resolved version actually deployed.
     """
-    scope.assert_in_scope(serial=serial)
+    serial = scope.require_serial(serial)
     abi = adb.get_abi(serial, adb=adb_bin)
     arch = frida_arch(abi)
     resolved = resolve_version(version, opener=opener)
 
     adb.enable_root(serial, adb=adb_bin)
+    if not adb.is_root(serial, adb=adb_bin):
+        raise FridaDeployError(
+            f"device {serial!r} is not rooted after 'adb root'; frida-server must "
+            f"run as root (use an emulator 'userdebug'/'eng' image)"
+        )
     with tempfile.TemporaryDirectory(prefix="frida-") as tmp:
         local = fetch_server(resolved, arch, tmp, opener=opener)
         adb.run(adb.push_argv(serial, local, REMOTE_PATH, adb=adb_bin))

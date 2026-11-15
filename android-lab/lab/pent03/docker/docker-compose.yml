@@ -11,6 +11,9 @@
 # at run time for the detected ABI, and the emulator image is the public
 # budtmo/docker-android build downloaded on `docker compose up`.
 #
+# All host-published ports bind to 127.0.0.1 so the emulator, the proxy and the
+# capture UI are never exposed as an open service on the network.
+#
 # Start the stack, then run the pipeline against a lab app:
 #   docker compose -f docker/docker-compose.yml up -d emulator mitmproxy
 #   docker compose -f docker/docker-compose.yml run --rm controller \
@@ -18,7 +21,10 @@
 services:
   emulator:
     image: budtmo/docker-android:emulator_11.0
-    privileged: true          # needs /dev/kvm for hardware acceleration
+    # No blanket `privileged: true`: grant only the KVM device the emulator
+    # needs for acceleration. If a host requires wider access for KVM
+    # passthrough, uncomment `privileged: true` explicitly and knowingly.
+    # privileged: true
     devices:
       - /dev/kvm
     environment:
@@ -26,23 +32,25 @@ services:
       WEB_VNC: "false"
       EMULATOR_ARGS: "-writable-system -no-window -no-audio -no-boot-anim"
     ports:
-      - "5555:5555"           # adb
-      - "6080:6080"           # optional noVNC view
+      - "127.0.0.1:5555:5555"   # adb (loopback only)
+      - "127.0.0.1:6080:6080"   # optional noVNC view (loopback only)
     networks: [labnet]
 
   mitmproxy:
     image: mitmproxy/mitmproxy:11.0.0
     command: mitmweb --web-host 0.0.0.0 --listen-host 0.0.0.0 --listen-port 8080
     ports:
-      - "8080:8080"           # intercepting proxy
-      - "8081:8081"           # mitmweb UI
+      - "127.0.0.1:8080:8080"   # intercepting proxy (loopback only)
+      - "127.0.0.1:8081:8081"   # mitmweb UI (loopback only)
     volumes:
-      - mitm-ca:/root/.mitmproxy
+      # The mitmproxy image runs as the 'mitmproxy' user and writes its CA under
+      # that user's home, so share THAT directory (not /root/.mitmproxy).
+      - mitm-ca:/home/mitmproxy/.mitmproxy
     networks: [labnet]
 
   controller:
     build:
-      context: ..
+      context: ..                       # the pent03/ module root
       dockerfile: docker/Dockerfile.controller
     depends_on: [emulator, mitmproxy]
     environment:
@@ -50,10 +58,14 @@ services:
       EMULATOR_ADB_PORT: "5555"
       CONNECT_TIMEOUT: "240"
     volumes:
+      # Same volume mounted where root's install_ca.py looks (~/.mitmproxy).
       - mitm-ca:/root/.mitmproxy:ro
     networks: [labnet]
     # Override the command with a target package, e.g.:
-    #   docker compose run --rm controller com.securebank.mobile
+    #   docker compose run --rm controller com.securebank.mobile --proxy 10.0.2.2:8080
+    # Note on --proxy: 10.0.2.2 is the emulator's alias for its own container
+    # host. Point --proxy at the address where the emulator container reaches the
+    # mitmproxy service for your host's networking (see README).
     command: []
 
 volumes:

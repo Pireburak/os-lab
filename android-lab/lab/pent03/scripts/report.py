@@ -15,7 +15,20 @@ import argparse
 import datetime as _dt
 import json
 import os
+import re
+import secrets
 import sys
+
+#: Any character that is not a safe filename atom becomes ``_`` so a crafted
+#: package id can never introduce a path separator or traversal into a report path.
+_UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def safe_name(value: str) -> str:
+    """Return ``value`` reduced to safe filename characters (no path control)."""
+    cleaned = _UNSAFE.sub("_", value or "")
+    cleaned = cleaned.strip("._") or "unknown"
+    return cleaned[:80]
 
 
 def utc_stamp(now: _dt.datetime | None = None) -> str:
@@ -65,7 +78,9 @@ def write_report(report, out_dir: str, *, now: _dt.datetime | None = None) -> tu
     data = report_to_dict(report, now=now)
     os.makedirs(out_dir, exist_ok=True)
     stamp = utc_stamp(now)
-    base = f"pent03-{data['package']}-{stamp}"
+    # safe_name() strips any path control from the package id, and a short random
+    # suffix keeps two runs in the same second from overwriting each other.
+    base = f"pent03-{safe_name(data['package'])}-{stamp}-{secrets.token_hex(3)}"
     json_path = os.path.join(out_dir, base + ".json")
     md_path = os.path.join(out_dir, base + ".md")
     with open(json_path, "w", encoding="utf-8") as fh:

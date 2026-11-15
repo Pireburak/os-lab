@@ -176,6 +176,11 @@ def install_writable_system(
     """API <= 33 path: remount /system and drop the cert in. Returns remote path."""
     remote = system_cert_path(hash_old)
     adb.enable_root(serial, adb=adb_bin)
+    if not adb.is_root(serial, adb=adb_bin):
+        raise CaInstallError(
+            f"device {serial!r} is not rooted after 'adb root'; writing to /system "
+            f"needs root + a '-writable-system' emulator image"
+        )
     adb.remount(serial, adb=adb_bin)
     with tempfile.TemporaryDirectory(prefix="mitmca-", dir=tmp_dir) as tmp:
         local = prepare_cert(ca_path, hash_old, tmp)
@@ -196,13 +201,35 @@ def install_apex_tmpfs(
     """API >= 34 path: tmpfs-overlay both trust stores. Returns APEX cert path."""
     cert_filename = system_cert_filename(hash_old)
     adb.enable_root(serial, adb=adb_bin)
+    if not adb.is_root(serial, adb=adb_bin):
+        raise CaInstallError(
+            f"device {serial!r} is not rooted after 'adb root'; the APEX overlay "
+            f"needs root (use an emulator 'userdebug'/'eng' image)"
+        )
     # disable verity/remount so mounts stick (best effort on emulator images).
     adb.run(adb.adb_argv(serial, "shell", "mount", "-o", "rw,remount", "/",
                          adb=adb_bin), check=False)
     with tempfile.TemporaryDirectory(prefix="mitmca-", dir=tmp_dir) as tmp:
         local = prepare_cert(ca_path, hash_old, tmp)
         adb.run(adb.push_argv(serial, local, f"/data/local/tmp/{cert_filename}", adb=adb_bin))
+    # Run the overlay. mkdir / mount / cp are load-bearing and must succeed;
+    # chown/chmod/chcon are best-effort (SELinux may be permissive on an image).
     for argv in apex_overlay_commands(cert_filename):
+        best_effort = argv[0] in ("chown", "chmod", "chcon") or (
+            len(argv) >= 3 and argv[0] == "sh" and
+            any(argv[2].startswith(c) for c in ("chown", "chmod", "chcon"))
+        )
+        proc = adb.run(adb.shell_argv(serial, *argv, adb=adb_bin), check=False)
+        if proc.returncode != 0 and not best_effort:
+            raise CaInstallError(
+                f"APEX overlay step failed ({proc.returncode}): {' '.join(argv)}\n"
+                f"{(proc.stderr or '').strip()}"
+            )
+    # The overlay lives in the adb-shell mount namespace; re-apply it inside the
+    # zygote namespace so freshly forked apps also see the CA. Best-effort:
+    # nsenter may be unavailable on some images, in which case apps spawned from
+    # the shell-namespace overlay still work after a cold app start.
+    for argv in apex_nsenter_commands():
         adb.run(adb.shell_argv(serial, *argv, adb=adb_bin), check=False)
     return f"{APEX_CACERTS_DIR}/{cert_filename}"
 
@@ -221,7 +248,7 @@ def install(
     ``method`` forces ``'writable-system'`` or ``'apex-tmpfs'``; otherwise it is
     chosen from ``ro.build.version.sdk``. Returns the on-device cert path.
     """
-    scope.assert_in_scope(serial=serial)
+    serial = scope.require_serial(serial)
     ca_path = _resolve_ca(ca_path)
     hash_old = subject_hash_old(ca_path, runner=runner)
 
@@ -260,7 +287,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"CA install failed: {exc}", file=sys.stderr)
         return 1
     print(f"mitmproxy CA installed at {remote} on {args.serial}")
-    print("Reboot the emulator (adb reboot) if apps were already running.")
+    if remote.startswith(APEX_CACERTS_DIR):
+        # The APEX overlay is a tmpfs and does NOT survive a reboot — do not tell
+        # the user to reboot; restart the target app, or re-run after a reboot.
+        print("APEX tmpfs overlay is non-persistent: it is lost on reboot. "
+              "Restart the target app to pick up the CA; re-run this after any reboot.")
+    else:
+        print("Reboot the emulator (adb reboot) if apps were already running.")
     return 0
 
 

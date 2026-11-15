@@ -65,3 +65,38 @@ def test_cli_reports_out_of_scope_with_exit_2(capsys):
     rc = scope.main(["--serial", "192.168.1.50:5555"])
     assert rc == 2
     assert "OUT OF SCOPE" in capsys.readouterr().err
+
+
+def test_invalid_package_with_path_control_is_rejected():
+    # A package carrying a path separator / traversal is never valid or in scope.
+    assert not scope.is_valid_package("com.securebank/../../etc")
+    assert not scope.is_valid_package("../../etc/passwd")
+    assert not scope.package_in_scope("com.securebank.mobile/../x")
+    with pytest.raises(scope.ScopeError):
+        scope.assert_in_scope(package="com.securebank.mobile/../x")
+
+
+def test_compose_emulator_hostname_in_scope():
+    assert scope.serial_in_scope("emulator:5555")
+    assert scope.serial_in_scope("emulator-5554")
+
+
+def test_proxy_host_is_exact_not_subnet():
+    assert scope.proxy_host_in_scope("10.0.2.2")
+    # a different host in the same /24 must NOT be trusted as a proxy
+    assert not scope.proxy_host_in_scope("10.0.2.5")
+    assert not scope.proxy_host_in_scope("10.0.2.200")
+
+
+def test_com_example_prefix_no_longer_trusted():
+    assert not scope.package_in_scope("com.example.anything")
+
+
+def test_require_serial_rejects_empty_and_out_of_scope():
+    with pytest.raises(scope.ScopeError):
+        scope.require_serial(None)
+    with pytest.raises(scope.ScopeError):
+        scope.require_serial("")
+    with pytest.raises(scope.ScopeError):
+        scope.require_serial("192.168.1.50:5555")
+    assert scope.require_serial("emulator-5554") == "emulator-5554"
