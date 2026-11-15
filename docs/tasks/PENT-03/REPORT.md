@@ -2,7 +2,7 @@
 
 - **Öğrenci:** Burak Özdemir · 2520191014
 - **Ders:** MYO062 İleri Sızma Testi (Vize Seçenek 3 -> PENT-03)
-- **Pull Request:** _(PR açıldığında eklenecek)_
+- **Pull Request:** https://github.com/keyvanarasteh/os-lab/pull/261
 - **Kanıt Videosu (2-4 dk):** https://drive.google.com/file/d/1EkefgWf0mzZ19vQw48SmSnomJjOPKwCJ/view?usp=sharing
 
 ## 1. Amaç ve Kapsam
