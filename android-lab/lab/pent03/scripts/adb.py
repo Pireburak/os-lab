@@ -53,13 +53,18 @@ def run(
     timeout: float | None = 120,
 ) -> subprocess.CompletedProcess:
     """Run an adb argv list. Raises :class:`AdbError` on non-zero exit."""
+    # Safe by construction: argv is always a list and shell is False (the
+    # default), so no string is ever handed to a shell for interpretation and no
+    # metacharacter can be expanded. Callers build argv from scope-validated
+    # inputs only. The opengrep audit rule flags any non-literal argv regardless.
     try:
-        proc = subprocess.run(
+        proc = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
             argv,
             check=False,
             text=True,
             capture_output=capture,
             timeout=timeout,
+            shell=False,
         )
     except FileNotFoundError as exc:  # adb not installed
         raise AdbError(f"adb binary not found: {argv[0]!r}") from exc

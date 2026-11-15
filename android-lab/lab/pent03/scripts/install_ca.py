@@ -118,7 +118,13 @@ def apex_nsenter_commands() -> list[list[str]]:
 
 
 def _default_runner(argv: list[str]) -> str:
-    proc = subprocess.run(argv, check=False, text=True, capture_output=True)
+    # Safe by construction: argv is a list and shell is False (default), so no
+    # shell interpretation/metacharacter expansion is possible. Only used to run
+    # a fixed ``openssl`` argv over a local PEM path. (opengrep audit rule flags
+    # any non-literal argv regardless of shell=False.)
+    proc = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
+        argv, check=False, text=True, capture_output=True, shell=False
+    )
     if proc.returncode != 0:
         raise CaInstallError(
             f"command failed ({proc.returncode}): {' '.join(argv)}\n"
