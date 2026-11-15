@@ -11,11 +11,14 @@ import {
   AndroidLogoIcon,
   AppleLogoIcon,
   BookOpenIcon,
+  BroomIcon,
   CircleIcon,
   CpuIcon,
   DesktopTowerIcon,
   FireIcon,
+  ChatCircleTextIcon,
   GitPullRequestIcon,
+  GlobeIcon,
   HeartbeatIcon,
   ScalesIcon,
   LaptopIcon,
@@ -46,7 +49,9 @@ export const LAB_ICON: Record<LabId, (size?: number) => ReactNode> = {
   windows: (s = 16) => <WindowsLogoIcon size={s} />,
   linux: (s = 16) => <TerminalWindowIcon size={s} />,
   ios: (s = 16) => <AppleLogoIcon size={s} />,
-  macos: (s = 16) => <LaptopIcon size={s} />
+  source: (s = 16) => <TerminalWindowIcon size={s} />,
+  macos: (s = 16) => <LaptopIcon size={s} />,
+  web: (s = 16) => <GlobeIcon size={s} />
 };
 
 /** Where a section id leads. Pages are static files, so every section is a plain href. */
@@ -58,7 +63,11 @@ export function sectionHref(id: string): string {
   if (id === "health") return localized("/health/");
   if (id === "legal") return localized("/legal/");
   if (id === "contribute") return localized("/contribute/");
+  if (id === "how-to-use") return localized("/how-to-use/");
+  if (id === "feedback") return localized("/feedback/");
   if (id === "content") return localized("/content/");
+  if (id.startsWith("cleanup-")) return localized(`/cleanup/${id === "cleanup-scan" ? "" : id.slice(8) + "/"}`);
+  if (id === "web-lab") return localized("/web-lab/");
   if (id === "firewall") {
     const locale = typeof window === "undefined" ? "en" : localeFromPath(window.location.pathname);
     return firewallPath(locale);
@@ -66,6 +75,7 @@ export function sectionHref(id: string): string {
   if (id.startsWith("legal-")) return localized(`/legal/${id.slice(6)}/`);
   if (id === "android-overview") return localized("/android/");
   if (id.startsWith("android-")) return localized(`/android/${id.slice(8)}/`);
+  if (id.startsWith("source-")) return localized(`/source/${id === "source-overview" ? "" : id.slice(7) + "/"}`);
   if (id.startsWith("lab-")) return localized(`/labs/${id.slice(4)}/`);
   return localized("/");
 }
@@ -97,7 +107,13 @@ function buildGroups(labs: LabStatus[] | undefined, running: Set<string>, androi
     { label: "os-lab", items: [
       { id: "host", label: "Home", icon: <DesktopTowerIcon size={16} /> },
       { id: "firewall", label: copy[locale].lab, icon: <FireIcon size={16} /> },
+      { id: "source-overview", label: "Source Lab", icon: LAB_ICON.source() },
+      { id: "cleanup-scan", label: "Cleanup Lab", icon: <BroomIcon size={16} /> },
+      { id: "feedback", label: "Feedback", icon: <ChatCircleTextIcon size={16} /> },
       { id: "repo", label: "Repository", icon: <BookOpenIcon size={16} /> }
+    ] },
+    { label: "Workspace", items: [
+      { id: "how-to-use", label: "How to use", icon: <BookOpenIcon size={16} /> }
     ] }
   ];
   const lab = (id: LabId) => labs?.find((l) => l.id === id);
@@ -112,6 +128,7 @@ function buildGroups(labs: LabStatus[] | undefined, running: Set<string>, androi
       label: "Workspace",
       items: [
         { id: "host", label: "This computer", icon: <DesktopTowerIcon size={16} /> },
+        { id: "how-to-use", label: "How to use", icon: <BookOpenIcon size={16} /> },
         {
           id: "jobs",
           label: "Jobs",
@@ -138,6 +155,26 @@ function buildGroups(labs: LabStatus[] | undefined, running: Set<string>, androi
             { id: "android-sitemap", label: "Routes & Sitemap" }
           ]
         },
+        { id: "source", label: "Source Lab", icon: LAB_ICON.source(),
+          badge: running.has("source") ? <RunningDot /> : <StatePill lab={lab("source")} />,
+          children: [
+            { id: "source-overview", label: "Overview" }, { id: "lab-source", label: "Readiness & setup" },
+            { id: "source-analyzer", label: "Crawler" }, { id: "source-evidence", label: "Evidence" },
+            { id: "source-deep-analysis", label: "Deep analysis" }, { id: "source-pipeline", label: "Pipeline" },
+            { id: "source-brain", label: "Brain" }, { id: "source-sources", label: "Sources" },
+            { id: "source-settings/runtime", label: "Runtime settings" }, { id: "source-docs", label: "Documentation" }
+          ] },
+        { id: "cleanup", label: "Cleanup Lab", icon: <BroomIcon size={16} />,
+          children: [
+            { id: "cleanup-scan", label: "Dashboard" },
+            { id: "cleanup-settings", label: "Settings" }
+          ] },
+        { id: "web", label: "Web Lab", icon: LAB_ICON.web(),
+          badge: running.has("web") ? <RunningDot /> : <StatePill lab={lab("web")} />,
+          children: [
+            { id: "web-lab", label: "Workbench" },
+            { id: "lab-web", label: "Readiness & setup" }
+          ] },
         ...(labShown(labs, "ios", activeId) ? [labItem("ios", "iOS Lab")] : []),
         ...(labShown(labs, "windows", activeId) ? [labItem("windows", "Windows Lab")] : []),
         ...(labShown(labs, "macos", activeId) ? [labItem("macos", "macOS Lab")] : []),
@@ -161,6 +198,7 @@ function buildGroups(labs: LabStatus[] | undefined, running: Set<string>, androi
           ]
         },
         { id: "contribute", label: "Contribute", icon: <GitPullRequestIcon size={16} /> },
+        { id: "feedback", label: "Feedback", icon: <ChatCircleTextIcon size={16} /> },
         { id: "repo", label: "Repository", icon: <BookOpenIcon size={16} /> }
       ]
     }
@@ -182,9 +220,13 @@ function buildMeta(): Record<string, SpotlightMeta> {
     "lab-windows": { description: "Windows VM with web desktop and RDP", aliases: ["windows", "rdp", "vm"] },
     "lab-macos": { description: "Native Xcode Simulator and Appium on a Mac", aliases: ["mac", "appium", "xcuitest"] },
     "lab-linux": { description: "Linux VM with web console and SSH", aliases: ["linux", "ssh", "vm"] },
+    "web-lab": { description: "Embedded in-app browser: open windows, inject JavaScript, read captured page activity", aliases: ["web", "browser", "webview", "injection", "javascript"] },
+    "lab-web": { description: "Web Lab engine readiness: cargo, make and the built engine", aliases: ["web", "engine", "setup"] },
     firewall: { description: "BGT207 dream-company firewall designs — branches, segmentation, products and rule sets", aliases: ["firewall", "bgt207", "ufw", "rules", "vlan", "dmz", "company"] },
     health: { description: "GET /api/health", aliases: ["status", "api"] },
     contribute: { description: "How to set up, test, rebuild, open a pull request and view roadmap TODOs", aliases: ["contribute", "contributing", "pull request", "pr", "development", "tests", "todos", "roadmap", "pentesting", "firewall", "tasks"] },
+    "how-to-use": { description: "Create a task prompt with os-lab capabilities for any LLM", aliases: ["how to", "guide", "prompt", "llm", "help", "task"] },
+    feedback: { description: "Report issues, suggest features, and share feedback", aliases: ["feedback", "bug", "issue", "request", "suggestion", "help"] },
     "legal-terms": { description: "Licence, authorized use, OS licences, no warranty", aliases: ["legal", "terms", "license", "warranty", "liability"] },
     "legal-acceptable-use": { description: "Supported and unsupported use, responsible disclosure", aliases: ["legal", "aup", "policy", "disclosure"] },
     "legal-privacy": { description: "Local-only console, browser storage, network connections, analytics", aliases: ["legal", "privacy", "gdpr", "kvkk", "telemetry", "cookies"] },
@@ -235,7 +277,7 @@ function Brand({ compact = false, action }: { compact?: boolean; action?: ReactN
           : "flex h-14 shrink-0 items-center gap-2.5 border-b border-(--iux-border) pr-2 pl-4"
       }
     >
-      <img src="/favicon.svg" alt="os-lab" width={28} height={28} className="iux-logo" />
+      <img src={localePath("/favicon.svg", "en")} alt="os-lab" width={28} height={28} className="iux-logo" />
       {!compact && (
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm leading-5 font-semibold tracking-tight">os-lab</div>
@@ -267,6 +309,9 @@ export function AppShell({
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useSidebarCollapsed("oslab.sidebar.collapsed");
+  const [sourceQuery, setSourceQuery] = useState("");
+  const [sourceRecords, setSourceRecords] = useState<SpotlightRecord[]>([]);
+  const [sourceSearchError, setSourceSearchError] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [spotlightOpen, setSpotlightOpen] = useState(false);
   const drawerRef = useRef<HTMLDialogElement>(null);
@@ -284,6 +329,23 @@ export function AppShell({
     if (!navOpen && drawer.open) drawer.close();
   }, [navOpen]);
 
+  useEffect(() => {
+    if (PUBLIC_PAGES || !spotlightOpen) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      const query = sourceQuery.replace(/^source:\s*/i, "").slice(0, 200);
+      void fetch(`/api/source/spotlight?section=evidence&limit=25&q=${encodeURIComponent(query)}`, { signal: controller.signal })
+        .then(async response => { if (!response.ok) throw new Error(); return response.json(); })
+        .then(result => {
+          setSourceSearchError(false);
+          setSourceRecords((result.data ?? []).filter((r: { href?: string }) => r.href?.startsWith("/source/")).map((r: { title: string; href: string }) => ({
+            id: r.href, section: "source-evidence", title: r.title, href: r.href
+          })));
+        }).catch(() => { if (!controller.signal.aborted) { setSourceRecords([]); setSourceSearchError(true); } });
+    }, 200);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [spotlightOpen, sourceQuery]);
+
   const running = useMemo(() => new Set((jobs ?? []).filter((j) => j.state === "running").map((j) => j.lab)), [jobs]);
   const groups = useMemo(
     () => buildGroups(host?.labs, running, Boolean(androidLogs?.running), locale, activeId),
@@ -292,6 +354,7 @@ export function AppShell({
   const meta = useMemo(buildMeta, []);
   const records = useMemo<SpotlightRecord[]>(
     () => [
+      ...sourceRecords,
       ...(host?.labs ?? []).flatMap((lab) =>
         lab.actions.map((action) => ({
           id: `${lab.id}:${action.id}`,
@@ -309,7 +372,7 @@ export function AppShell({
         badge: job.state
       }))
     ],
-    [host?.labs, jobs]
+    [host?.labs, jobs, sourceRecords]
   );
   const allCommands = useMemo<SpotlightCommand[]>(
     () => [
@@ -375,6 +438,8 @@ export function AppShell({
         </div>
       </div>
       <Spotlight
+        onQueryChange={setSourceQuery}
+        searchError={sourceSearchError && !PUBLIC_PAGES ? "Source search unavailable" : undefined}
         open={spotlightOpen}
         onOpenChange={setSpotlightOpen}
         groups={groups}
@@ -388,6 +453,7 @@ export function AppShell({
           ...(labShown(host?.labs, "linux", activeId) ? [{ scope: "linux", description: "Linux Lab actions", icon: <CpuIcon size={16} /> }] : [])
         ]}
         onNavigate={(section, record) => {
+          if (record?.href?.startsWith("/source/")) return go(localePath(record.href, locale));
           if (record && section === "jobs") return go(`${sectionHref("jobs")}#${record.id}`);
           if (record && section.startsWith("lab-")) return go(`${sectionHref(section)}#action=${record.id.split(":")[1]}`);
           go(sectionHref(section));

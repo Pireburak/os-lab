@@ -20,6 +20,10 @@ The lab runs in several modes depending on host capabilities.
   that provisions a VirtualBox/Podman userland lab without elevation; runbook
   [[android-lab/lab/README-WINDOWS.md]]. It is UTF-8 **with BOM** so it parses
   under Windows PowerShell 5.1, and defines `Send-VmKeyString` at script scope.
+  `lab.ps1 win-preflight` runs [[android-lab/lab/scripts/win_preflight.py]]
+  (PENT-23): a read-only, no-admin VT-x/Hyper-V/VirtualBox/WSL2/Podman
+  readiness check that marks each fix admin or no-admin and recommends a lab
+  model; scenarios replay from `tests/fixtures/win_preflight/`.
 - **Ubuntu Server:** host provisioning via [[android-lab/lab/scripts/setup-ubuntu.sh]]
   and runbook [[android-lab/lab/README-UBUNTU.md]].
 
@@ -67,10 +71,29 @@ report generator [[android-lab/lab/scripts/app_reporter.py]], the MobSF client
 [[android-lab/lab/scripts/apk_patcher.py]]. Prebuilt Frida hooks are in
 [[android-lab/lab/hooks]].
 
+### Pinning detector
+
+[[android-lab/lab/scripts/pinning_detector.py]] (PENT-11) classifies how an APK or decompiled
+tree pins TLS, statically, before any dynamic work.
+
+It decodes binary manifest and `res/xml` Network Security Config files itself (counting `<pin-set>`
+configs as strong evidence only when matched to a manifest `@xml/<name>` resource path, and
+deduplicating identical copies), then scores OkHttp `sha256/` and `sha1/` pin literals, custom
+TrustManager key checks, TrustKit and cross-platform plugins, Flutter, native `.so` verification and
+bundled certificates. Generic TLS API usage and library-only class presence stay `low` confidence.
+Scans enforce per-file and aggregate file/byte limits, expose coverage metadata (`scan_complete`,
+`skipped`, `skipped_count`, `scan_truncated`), return `incomplete_scan` instead of `none_detected`
+when inputs were skipped, escape untrusted paths in Markdown, and publish JSON + Markdown report
+pairs atomically with output-directory exclusion in non-`--json` runs. Output is a ranked method
+list with evidence, a `pinned` / `likely_pinned` / `possible` / `none_detected` /
+`incomplete_scan` status, weak-validation flags and the matching lab hook as next step. It reads
+local files only (`make pinning APK=`); tests are in
+[[android-lab/lab/tests/test_pinning_detector.py]].
+
 ## Tests
 
 The lab ships a pytest suite in [[android-lab/lab/tests]].
 
-It covers the analyzer, reporter, MobSF client, secret scanner, patcher, flow
+It covers the analyzer, reporter, MobSF client, secret scanner, pinning detector, patcher, flow
 parser, agentic engine and web UI, and runs in CI — see
 [[tooling#Local test runner]].

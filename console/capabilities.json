@@ -393,6 +393,26 @@
               "note": "Needs a Linux/KVM host or Windows with WSL2. Use a remote Linux machine."
             }
           }
+        },
+        {
+          "id": "web-embedded",
+          "lab": "web",
+          "title": "Web Lab",
+          "summary": "Embedded in-app browser with JavaScript injection; builds from source with Cargo.",
+          "support": {
+            "linux": {
+              "level": "full",
+              "note": "WebKitGTK 4.1 packages required for the engine's webviews."
+            },
+            "macos": {
+              "level": "full",
+              "note": "WKWebView is a system framework; only Cargo is required."
+            },
+            "windows": {
+              "level": "full",
+              "note": "WebView2 ships with Windows 10/11; only Cargo is required."
+            }
+          }
         }
       ]
     },
@@ -474,6 +494,33 @@
             "linux": {
               "level": "full",
               "note": "Rendered from the repository's own Markdown"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "source",
+      "title": "Source Lab",
+      "description": "Local source and package analysis.",
+      "items": [
+        {
+          "id": "source-static",
+          "lab": "source",
+          "title": "Source Lab",
+          "summary": "Five-platform static detection and structural maps; optional browser tooling.",
+          "support": {
+            "linux": {
+              "level": "full",
+              "note": "Native Python 3.11+; no Docker or KVM required."
+            },
+            "macos": {
+              "level": "full",
+              "note": "Native Python 3.11+; no Docker or KVM required."
+            },
+            "windows": {
+              "level": "full",
+              "note": "Native Python 3.11+; no Docker or KVM required."
             }
           }
         }
