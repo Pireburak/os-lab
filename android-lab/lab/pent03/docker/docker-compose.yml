@@ -1,0 +1,64 @@
+# PENT-03 — headless Android analysis stack.
+#
+# Three services:
+#   emulator   — a headless Android emulator exposing adb on tcp/5555.
+#   mitmproxy  — intercepting proxy on 8080; its generated CA is shared with
+#                the controller through the mitm-ca volume.
+#   controller — the Alpine image built from Dockerfile.controller that drives
+#                the emulator over adb and runs the Python pipeline.
+#
+# No image here bakes in vendor binaries you don't own: frida-server is pulled
+# at run time for the detected ABI, and the emulator image is the public
+# budtmo/docker-android build downloaded on `docker compose up`.
+#
+# Start the stack, then run the pipeline against a lab app:
+#   docker compose -f docker/docker-compose.yml up -d emulator mitmproxy
+#   docker compose -f docker/docker-compose.yml run --rm controller \
+#       com.securebank.mobile --proxy 10.0.2.2:8080
+services:
+  emulator:
+    image: budtmo/docker-android:emulator_11.0
+    privileged: true          # needs /dev/kvm for hardware acceleration
+    devices:
+      - /dev/kvm
+    environment:
+      EMULATOR_DEVICE: "Samsung Galaxy S10"
+      WEB_VNC: "false"
+      EMULATOR_ARGS: "-writable-system -no-window -no-audio -no-boot-anim"
+    ports:
+      - "5555:5555"           # adb
+      - "6080:6080"           # optional noVNC view
+    networks: [labnet]
+
+  mitmproxy:
+    image: mitmproxy/mitmproxy:11.0.0
+    command: mitmweb --web-host 0.0.0.0 --listen-host 0.0.0.0 --listen-port 8080
+    ports:
+      - "8080:8080"           # intercepting proxy
+      - "8081:8081"           # mitmweb UI
+    volumes:
+      - mitm-ca:/root/.mitmproxy
+    networks: [labnet]
+
+  controller:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.controller
+    depends_on: [emulator, mitmproxy]
+    environment:
+      EMULATOR_HOST: emulator
+      EMULATOR_ADB_PORT: "5555"
+      CONNECT_TIMEOUT: "240"
+    volumes:
+      - mitm-ca:/root/.mitmproxy:ro
+    networks: [labnet]
+    # Override the command with a target package, e.g.:
+    #   docker compose run --rm controller com.securebank.mobile
+    command: []
+
+volumes:
+  mitm-ca:
+
+networks:
+  labnet:
+    driver: bridge
