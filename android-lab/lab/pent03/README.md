@@ -1,5 +1,9 @@
 # PENT-03 — scripts, hooks and tests
 
+> **Öğrenci:** Burak Özdemir · 2520191014 — **Ders:** MYO062 (Vize Seçenek 3 → PENT-03)
+> **Kanıt Videosu (2–4 dk):** https://drive.google.com/file/d/1EkefgWf0mzZ19vQw48SmSnomJjOPKwCJ/view?usp=sharing
+> **Rapor:** [`docs/tasks/PENT-03/REPORT.md`](../../../docs/tasks/PENT-03/REPORT.md)
+
 Standard-library-only Python modules and Frida hooks that make up the PENT-03
 pipeline. Every module exposes an importable API plus a `main()` CLI, and keeps
 *pure* helpers (argv/URL/filename/hash builders) separate from *side-effecting*
